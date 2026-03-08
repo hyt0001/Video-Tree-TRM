@@ -89,8 +89,8 @@ conda run -n Video-Tree-TRM ruff check xxx --fix
   - **必须** 不考虑向后兼容，直接修改原文件。代码简洁性优先。
 
 ### 4.2 配置管理规范
-- **优先级**: CLI 参数 > 环境变量 > .env > YAML（使用 `${env:VAR}` 引用环境变量）
-- **文件**: `config/default.yaml`（项目配置）, `.env`（敏感信息，不提交）, `.env.example`（模板）
+- **优先级**: CLI args > `.env` > YAML，三者统一归口到 dataclass
+- **文件**: `config/default.yaml`（全量非敏感配置，必须写全）, `.env`（敏感信息，不提交）, `.env.example`（模板）
 
 ### 4.3 测试组织规范
 - **目录**: `tests/{unit,integration,e2e}/test_*.py`，最低覆盖率 80%

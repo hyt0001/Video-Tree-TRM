@@ -9,7 +9,7 @@
 - 文本嵌入器（text_embed）**冻结不训练**，TreeIndex 中所有 embedding 为预计算静态值。
 - 训练分两阶段：Phase 1 纯导航监督（单轮），Phase 2 加入 ACT halt（多轮）。
 - MVP 优先文本模态（LongBench），视频模态（VideoMME）后续扩展。
-- 配置管理：dataclass + YAML，优先级 CLI > 环境变量 > .env > YAML。
+- 配置管理：dataclass（无默认值，纯类型定义）+ YAML（全量配置）+ .env（敏感信息），优先级 CLI args > .env > YAML，三者统一归口到 dataclass。
 
 ---
 
@@ -668,103 +668,149 @@ class Pipeline:
 ### 1.10 config.py — 配置管理
 
 **文件**: `video_tree_trm/config.py`
-**职责**: 所有超参数的 dataclass 定义 + YAML 加载。
+**职责**: 所有超参数的 dataclass 类型定义（无默认值）+ 多源加载。
+
+#### 设计原则
+
+- **Dataclass 无默认值**: 纯类型定义 + 结构化访问，YAML 必须写全，漏写即报错。
+- **三层优先级**: `CLI args > .env > YAML`，高优先级覆盖低优先级。
+- **统一归口**: 无论来源，最终构造唯一 `Config` dataclass 对象，代码只与 dataclass 交互。
+- **敏感信息隔离**: `api_key` 等敏感字段只写在 `.env` 中，不进 YAML 和代码。
+
+#### 加载流程
+
+```
+Step 1: 读取 YAML → base dict（全量非敏感配置）
+Step 2: 读取 .env  → 覆盖 dict 中对应字段（api_key 等敏感信息）
+Step 3: 解析 CLI args → 最终覆盖 dict 中对应字段
+Step 4: dict → Config dataclass（校验完整性，缺字段直接报错）
+```
+
+#### Dataclass 定义
 
 ```python
 @dataclass
 class TreeConfig:
     # 文本模式
-    max_paragraphs_per_l2: int = 5          # 每个 L2 节点包含的最大段落数
+    max_paragraphs_per_l2: int              # 每个 L2 节点包含的最大段落数
     # 视频模式
-    l1_segment_duration: float = 600.0      # L1 段时长（秒）
-    l2_clip_duration: float = 20.0          # L2 clip 时长（秒）
-    l3_fps: float = 1.0                     # L3 帧提取频率
-    l2_representative_frames: int = 3       # L2 VLM 描述用的代表帧数
+    l1_segment_duration: float              # L1 段时长（秒）
+    l2_clip_duration: float                 # L2 clip 时长（秒）
+    l3_fps: float                           # L3 帧提取频率
+    l2_representative_frames: int           # L2 VLM 描述用的代表帧数
     # 通用
-    cache_dir: str = "cache/trees"
+    cache_dir: str                          # TreeIndex 缓存目录
 
 @dataclass
 class EmbedConfig:
-    model_name: str = "BAAI/bge-base-zh-v1.5"
-    embed_dim: int = 768
-    device: str = "cuda"
+    model_name: str                         # 嵌入模型名称
+    embed_dim: int                          # 嵌入维度 D
+    device: str                             # "cuda" | "cpu"
 
 @dataclass
 class LLMConfig:
-    backend: str = "qwen"                   # "qwen" | "openai" | "ollama"
-    api_key: str = ""                       # 从 .env 读取
-    model: str = "qwen-plus"
-    api_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    max_tokens: int = 256
-    temperature: float = 0.1
+    backend: str                            # "qwen" | "openai" | "ollama"
+    api_key: str                            # 从 .env 加载，不写入 YAML
+    model: str                              # 模型名称
+    api_url: str                            # API 端点 URL
+    max_tokens: int                         # 最大生成 token 数
+    temperature: float                      # 采样温度
 
 @dataclass
 class VLMConfig:
-    backend: str = "qwen"
-    api_key: str = ""
-    model: str = "qwen-vl-plus"
-    api_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    max_tokens: int = 256
-    temperature: float = 0.1
+    backend: str                            # "qwen" | "openai" | "ollama"
+    api_key: str                            # 从 .env 加载，不写入 YAML
+    model: str                              # 模型名称
+    api_url: str                            # API 端点 URL
+    max_tokens: int                         # 最大生成 token 数
+    temperature: float                      # 采样温度
 
 @dataclass
 class RetrieverConfig:
-    embed_dim: int = 768
-    num_heads: int = 4
-    L_layers: int = 2                       # ReasoningModule 层数
-    L_cycles: int = 4                       # 每级推理迭代次数
-    max_rounds: int = 5                     # ACT 最大遍历轮次
-    ffn_expansion: float = 2.0              # SwiGLU 扩展比
-    checkpoint: Optional[str] = None        # 训练好的模型权重路径
+    embed_dim: int                          # 嵌入维度（须与 EmbedConfig.embed_dim 一致）
+    num_heads: int                          # Cross-Attention 头数
+    L_layers: int                           # ReasoningModule 层数
+    L_cycles: int                           # 每级推理迭代次数
+    max_rounds: int                         # ACT 最大遍历轮次
+    ffn_expansion: float                    # SwiGLU 扩展比
+    checkpoint: Optional[str]               # 训练好的模型权重路径（推理时必填）
 
 @dataclass
 class TrainConfig:
-    lr: float = 1e-4
-    weight_decay: float = 1e-5
-    batch_size: int = 1                     # MVP 单样本训练
-    max_epochs_phase1: int = 30             # Phase 1 导航训练
-    max_epochs_phase2: int = 20             # Phase 2 ACT 训练
-    nav_loss_weight: float = 1.0
-    act_loss_weight: float = 0.1
-    act_lambda_step: float = 0.1            # ACT 步数惩罚
-    act_gamma: float = 0.9                  # ACT 折扣因子
-    eval_interval: int = 5                  # 每 N epoch 评估一次
-    save_dir: str = "checkpoints"
-    dataset: str = "longbench"              # "longbench" | "narrativeqa" | "videomme"
-    dataset_path: str = "data/longbench"
+    lr: float                               # 学习率
+    weight_decay: float                     # 权重衰减
+    batch_size: int                         # 批大小
+    max_epochs_phase1: int                  # Phase 1 导航训练轮数
+    max_epochs_phase2: int                  # Phase 2 ACT 训练轮数
+    nav_loss_weight: float                  # 导航损失权重
+    act_loss_weight: float                  # ACT 损失权重
+    act_lambda_step: float                  # ACT 步数惩罚系数
+    act_gamma: float                        # ACT 折扣因子
+    eval_interval: int                      # 每 N epoch 评估一次
+    save_dir: str                           # 模型权重保存目录
+    dataset: str                            # "longbench" | "narrativeqa" | "videomme"
+    dataset_path: str                       # 数据集路径
 
 @dataclass
 class Config:
-    tree: TreeConfig = field(default_factory=TreeConfig)
-    embed: EmbedConfig = field(default_factory=EmbedConfig)
-    llm: LLMConfig = field(default_factory=LLMConfig)
-    vlm: VLMConfig = field(default_factory=VLMConfig)
-    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
-    train: TrainConfig = field(default_factory=TrainConfig)
+    tree: TreeConfig
+    embed: EmbedConfig
+    llm: LLMConfig
+    vlm: VLMConfig
+    retriever: RetrieverConfig
+    train: TrainConfig
 
     @classmethod
-    def from_yaml(cls, path: str) -> "Config": ...
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Config": ...
+    def load(cls, yaml_path: str, cli_args: Optional[dict] = None) -> "Config":
+        """
+        三层合并加载:
+          1. 读取 YAML → base dict
+          2. 读取 .env  → 覆盖 api_key 等敏感字段
+          3. cli_args   → 最终覆盖
+          4. dict → Config（缺字段报 TypeError）
+        """
+        ...
 ```
 
-**YAML 示例** (`config/default.yaml`):
+#### 文件分工
+
+| 文件 | 内容 | 提交到 Git |
+|------|------|-----------|
+| `config/default.yaml` | 全量非敏感配置（必须写全所有字段） | 是 |
+| `.env` | 敏感信息（api_key 等） | 否 |
+| `.env.example` | `.env` 模板（值留空） | 是 |
+
+#### YAML 示例 (`config/default.yaml`)
 
 ```yaml
+tree:
+  max_paragraphs_per_l2: 5
+  l1_segment_duration: 600.0
+  l2_clip_duration: 20.0
+  l3_fps: 1.0
+  l2_representative_frames: 3
+  cache_dir: "cache/trees"
+
 embed:
   model_name: "BAAI/bge-base-zh-v1.5"
+  embed_dim: 768
   device: "cuda"
 
 llm:
   backend: "qwen"
-  api_key: "${env:QWEN_API_KEY}"
   model: "qwen-plus"
+  api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  max_tokens: 256
+  temperature: 0.1
+  # api_key: 从 .env 加载，此处不写
 
 vlm:
   backend: "qwen"
-  api_key: "${env:QWEN_API_KEY}"
   model: "qwen-vl-plus"
+  api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  max_tokens: 256
+  temperature: 0.1
+  # api_key: 从 .env 加载，此处不写
 
 retriever:
   embed_dim: 768
@@ -772,12 +818,31 @@ retriever:
   L_layers: 2
   L_cycles: 4
   max_rounds: 5
+  ffn_expansion: 2.0
+  checkpoint: null
 
 train:
-  lr: 1e-4
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  batch_size: 1
   max_epochs_phase1: 30
+  max_epochs_phase2: 20
+  nav_loss_weight: 1.0
+  act_loss_weight: 0.1
+  act_lambda_step: 0.1
+  act_gamma: 0.9
+  eval_interval: 5
+  save_dir: "checkpoints"
   dataset: "longbench"
   dataset_path: "data/longbench"
+```
+
+#### .env 示例
+
+```bash
+# .env — 敏感信息，不提交到 Git
+LLM_API_KEY=sk-xxx
+VLM_API_KEY=sk-xxx
 ```
 
 **依赖**: dataclasses, yaml, python-dotenv
