@@ -1,0 +1,52 @@
+tree:
+  max_paragraphs_per_l2: 5
+  l1_segment_duration: 600.0
+  l2_clip_duration: 20.0
+  l3_fps: 1.0
+  l2_representative_frames: 3
+  cache_dir: "cache/trees"
+
+embed:
+  model_name: "BAAI/bge-base-zh-v1.5"
+  embed_dim: 768
+  device: "cuda"
+
+llm:
+  backend: "qwen"
+  model: "qwen-plus"
+  api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  max_tokens: 256
+  temperature: 0.1
+  # api_key: 从 .env 加载，此处不写
+
+vlm:
+  backend: "qwen"
+  model: "qwen-vl-plus"
+  api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  max_tokens: 256
+  temperature: 0.1
+  # api_key: 从 .env 加载，此处不写
+
+retriever:
+  embed_dim: 768
+  num_heads: 4
+  L_layers: 2
+  L_cycles: 4
+  max_rounds: 5
+  ffn_expansion: 2.0
+  checkpoint: null
+
+train:
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  batch_size: 1
+  max_epochs_phase1: 30
+  max_epochs_phase2: 20
+  nav_loss_weight: 1.0
+  act_loss_weight: 0.1
+  act_lambda_step: 0.1
+  act_gamma: 0.9
+  eval_interval: 5
+  save_dir: "checkpoints"
+  dataset: "longbench"
+  dataset_path: "data/longbench"
